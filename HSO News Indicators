@@ -1,0 +1,249 @@
+//+------------------------------------------------------------------+
+//| Visual News Timeline Dashboard                                   |
+//| Informational indicator – no trading                             |
+//| © Hart Strategy Providers                                        |
+//+------------------------------------------------------------------+
+#property indicator_chart_window
+#property indicator_plots 0
+#property strict
+#property version   "1.00"
+#property copyright "Hart Strategy Providers"
+#property description "Visual economic news timeline indicator"
+
+//========================= INPUT PARAMETERS =========================
+input bool   InpShowDashboard   = true;   // Show dashboard panel
+input bool   InpShowTimeline    = true;   // Show timeline bars
+input int    InpLookAheadHours  = 48;     // Hours ahead to display
+input int    InpRefreshMinutes  = 5;      // News refresh interval
+input bool   InpHighImpactOnly  = false;  // Show high impact only
+input int    InpTheme           = 0;      // Theme: 0=Dark,1=Blue,2=Gold
+input bool   InpEnableAlerts    = false;  // Enable alerts
+input int    InpAlertMinutes    = 15;     // Alert before event (minutes)
+
+//=========================== UI CONSTANTS ===========================
+#define UI_PREFIX "VNT_"
+#define PANEL_X   20
+#define PANEL_Y   40
+#define PANEL_W   360
+#define PANEL_H   230
+#define ROW_H     18
+#define MAX_ROWS  6
+
+//=========================== COLORS =================================
+color THEME_BG, THEME_HEADER;
+color CLR_TEXT_MAIN = clrWhite;
+color CLR_TEXT_DIM  = (color)0xAAAAAA;
+color CLR_HIGH      = (color)0xE74C3C;
+color CLR_MEDIUM    = (color)0xF1C40F;
+color CLR_LOW       = (color)0x2ECC71;
+color CLR_TIMELINE  = (color)0x4A90E2;
+
+//=========================== DATA STRUCT =============================
+struct NEWS
+{
+   datetime time;
+   string   currency;
+   string   title;
+   int      impact;   // 3=High,2=Medium,1=Low
+   bool     alerted;
+};
+
+NEWS NewsList[32];
+int  NewsCount=0;
+int  fail_count=0;
+
+//=========================== THEME ==================================
+void ApplyTheme()
+{
+   if(InpTheme==1) // Blue
+   {
+      THEME_BG     =(color)0x101E2A;
+      THEME_HEADER =(color)0x1F3A5F;
+   }
+   else if(InpTheme==2) // Gold
+   {
+      THEME_BG     =(color)0x1C1A10;
+      THEME_HEADER =(color)0x3A2F1F;
+   }
+   else // Dark
+   {
+      THEME_BG     =(color)0x111418;
+      THEME_HEADER =(color)0x1E2A3A;
+   }
+}
+
+//=========================== UI HELPERS ==============================
+void DrawRect(string name,int x,int y,int w,int h,color clr)
+{
+   ObjectCreate(0,name,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,name,OBJPROP_XSIZE,w);
+   ObjectSetInteger(0,name,OBJPROP_YSIZE,h);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
+   ObjectSetInteger(0,name,OBJPROP_BACK,true);
+}
+
+void DrawLabel(string name,int x,int y,string txt,int size,color clr)
+{
+   ObjectCreate(0,name,OBJ_LABEL,0,0,0);
+   ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSetText(name,txt,size,"Segoe UI",clr);
+}
+
+//=========================== DASHBOARD ===============================
+void DrawDashboard()
+{
+   if(!InpShowDashboard) return;
+
+   DrawRect(UI_PREFIX+"BG",PANEL_X,PANEL_Y,PANEL_W,PANEL_H,THEME_BG);
+   DrawRect(UI_PREFIX+"HDR",PANEL_X,PANEL_Y,PANEL_W,28,THEME_HEADER);
+
+   DrawLabel(UI_PREFIX+"TITLE",PANEL_X+12,PANEL_Y+6,
+             "VISUAL NEWS TIMELINE",12,CLR_TEXT_MAIN);
+
+   string status = (fail_count>=3) ? "NEWS: CONNECTION LOST" : "NEWS: LIVE";
+   color  stclr  = (fail_count>=3) ? CLR_HIGH : CLR_LOW;
+
+   DrawLabel(UI_PREFIX+"STATUS",PANEL_X+12,PANEL_Y+38,status,10,stclr);
+}
+
+//=========================== TIMELINE ================================
+void DrawTimeline(datetime t,string label,color clr)
+{
+   if(!InpShowTimeline) return;
+
+   string name=UI_PREFIX+"TL_"+IntegerToString((int)t);
+   ObjectCreate(0,name,OBJ_VLINE,0,t,0);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
+   ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_DOT);
+
+   ObjectCreate(0,name+"_T",OBJ_TEXT,0,t,0);
+   ObjectSetText(name+"_T",label,9,"Segoe UI",clr);
+}
+
+//=========================== PARSER ==================================
+string Extract(const string src,int &pos)
+{
+   int p1=StringFind(src,"\"",pos);
+   int p2=StringFind(src,"\"",p1+1);
+   pos=p2+1;
+   if(p1<0 || p2<0) return "";
+   return StringSubstr(src,p1+1,p2-p1-1);
+}
+
+void ParseNews(string json)
+{
+   NewsCount=0;
+   int pos=0;
+
+   while((pos=StringFind(json,"\"title\":",pos))!=-1 && NewsCount<32)
+   {
+      int p=pos;
+      string title   = Extract(json,p);
+
+      p=StringFind(json,"\"currency\":",pos);
+      string cur     = Extract(json,p);
+
+      p=StringFind(json,"\"impact\":",pos);
+      string imp     = Extract(json,p);
+
+      p=StringFind(json,"\"date\":",pos);
+      string date    = Extract(json,p);
+
+      datetime t = StringToTime(date);
+      if(t<TimeCurrent() || t>TimeCurrent()+InpLookAheadHours*3600) { pos++; continue; }
+
+      int impact = (imp=="High")?3:(imp=="Medium")?2:1;
+      if(InpHighImpactOnly && impact<3) { pos++; continue; }
+
+      NewsList[NewsCount].time=t;
+      NewsList[NewsCount].currency=cur;
+      NewsList[NewsCount].title=title;
+      NewsList[NewsCount].impact=impact;
+      NewsList[NewsCount].alerted=false;
+      NewsCount++;
+      pos++;
+   }
+}
+
+//=========================== WEBREQUEST ==============================
+bool FetchNews()
+{
+   char result[];
+   string headers;
+   int timeout=5000;
+   string url="https://nfs.faireconomy.media/ff_calendar_thisweek.json";
+
+   int res=WebRequest("GET",url,"","",timeout,result,headers);
+   if(res!=200)
+   {
+      fail_count++;
+      return false;
+   }
+
+   fail_count=0;
+   ParseNews(CharArrayToString(result));
+   return true;
+}
+
+//=========================== UPDATE UI ===============================
+color ImpactColor(int impact)
+{
+   if(impact==3) return CLR_HIGH;
+   if(impact==2) return CLR_MEDIUM;
+   return CLR_LOW;
+}
+
+void UpdateUI()
+{
+   ObjectsDeleteAll(0,UI_PREFIX);
+
+   DrawDashboard();
+
+   for(int i=0;i<NewsCount && i<MAX_ROWS;i++)
+   {
+      string row=TimeToString(NewsList[i].time,TIME_MINUTES)+"  "+
+                 NewsList[i].currency+"  "+NewsList[i].title;
+
+      DrawLabel(UI_PREFIX+"ROW_"+(string)i,
+                PANEL_X+12,PANEL_Y+70+(i*ROW_H),
+                row,9,ImpactColor(NewsList[i].impact));
+
+      DrawTimeline(NewsList[i].time,
+                   NewsList[i].currency,
+                   ImpactColor(NewsList[i].impact));
+
+      int mins = int((NewsList[i].time-TimeCurrent())/60);
+      if(InpEnableAlerts && !NewsList[i].alerted && mins<=InpAlertMinutes && mins>=0)
+      {
+         Alert("Upcoming news: ",NewsList[i].currency," ",NewsList[i].title);
+         NewsList[i].alerted=true;
+      }
+   }
+}
+
+//=========================== SYSTEM ==================================
+int OnInit()
+{
+   ApplyTheme();
+   FetchNews();
+   UpdateUI();
+   EventSetTimer(InpRefreshMinutes*60);
+   return INIT_SUCCEEDED;
+}
+
+void OnTimer()
+{
+   FetchNews();
+   UpdateUI();
+}
+
+void OnDeinit(const int reason)
+{
+   ObjectsDeleteAll(0,UI_PREFIX);
+   EventKillTimer();
+}
