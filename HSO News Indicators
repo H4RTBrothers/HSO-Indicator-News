@@ -91,7 +91,10 @@ void DrawLabel(string name,int x,int y,string txt,int size,color clr)
    ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
    ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
    ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
-   ObjectSetText(name,txt,size,"Segoe UI",clr);
+   ObjectSetString(0,name,OBJPROP_TEXT,txt);
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,size);
+   ObjectSetString(0,name,OBJPROP_FONT,"Segoe UI");
+   ObjectSetInteger(0,name,OBJPROP_COLOR,clr);
 }
 
 //=========================== DASHBOARD ===============================
@@ -122,7 +125,10 @@ void DrawTimeline(datetime t,string label,color clr)
    ObjectSetInteger(0,name,OBJPROP_STYLE,STYLE_DOT);
 
    ObjectCreate(0,name+"_T",OBJ_TEXT,0,t,0);
-   ObjectSetText(name+"_T",label,9,"Segoe UI",clr);
+   ObjectSetString(0,name+"_T",OBJPROP_TEXT,label);
+   ObjectSetInteger(0,name+"_T",OBJPROP_FONTSIZE,9);
+   ObjectSetString(0,name+"_T",OBJPROP_FONT,"Segoe UI");
+   ObjectSetInteger(0,name+"_T",OBJPROP_COLOR,clr);
 }
 
 //=========================== PARSER ==================================
@@ -173,12 +179,13 @@ void ParseNews(string json)
 //=========================== WEBREQUEST ==============================
 bool FetchNews()
 {
+   char data[];
    char result[];
    string headers;
    int timeout=5000;
    string url="https://nfs.faireconomy.media/ff_calendar_thisweek.json";
 
-   int res=WebRequest("GET",url,"","",timeout,result,headers);
+   int res=WebRequest("GET",url,"","",timeout,data,0,result,headers);
    if(res!=200)
    {
       fail_count++;
@@ -246,4 +253,21 @@ void OnDeinit(const int reason)
 {
    ObjectsDeleteAll(0,UI_PREFIX);
    EventKillTimer();
+}
+
+//=========================== CALCULATE ===============================
+int OnCalculate(const int rates_total,
+                const int prev_calculated,
+                const datetime &time[],
+                const double &open[],
+                const double &high[],
+                const double &low[],
+                const double &close[],
+                const long &tick_volume[],
+                const long &volume[],
+                const int &spread[])
+{
+   // This indicator is informational only and doesn't plot any buffers
+   // OnTimer handles all updates, this is just required for MQL5 structure
+   return rates_total;
 }
